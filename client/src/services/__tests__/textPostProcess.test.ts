@@ -148,9 +148,18 @@ describe('convertChineseNumbers', () => {
     expect(convertChineseNumbers('万一出事了')).toBe('万一出事了')
   })
 
-  it('不转孤立单字与无位值词的逐位串', () => {
-    expect(convertChineseNumbers('第一二三点')).toBe('第一二三点')
-    expect(convertChineseNumbers('一二三四五')).toBe('一二三四五')
+  it('无位值词的连续逐位串 → 逐字转阿拉伯（语音逐位报数场景）', () => {
+    expect(convertChineseNumbers('一二三四五')).toBe('12345')
+    expect(convertChineseNumbers('二零零三')).toBe('2003')
+    expect(convertChineseNumbers('一零零二三版本')).toBe('10023版本')
+    expect(convertChineseNumbers('第一二三点')).toBe('第123点')
+  })
+
+  it('孤立单字数字不转（避免拆坏 一起/一点 等词内单字与量词前单字）', () => {
+    expect(convertChineseNumbers('一起走')).toBe('一起走')
+    expect(convertChineseNumbers('一点水')).toBe('一点水')
+    expect(convertChineseNumbers('一个人')).toBe('一个人')
+    expect(convertChineseNumbers('来了三次')).toBe('来了三次')
   })
 
   it('时间：数字转阿拉伯，保留点/分/半', () => {
@@ -182,6 +191,43 @@ describe('convertChineseNumbers', () => {
     expect(convertChineseNumbers('一点钟到')).toBe('1点钟到')
     expect(convertChineseNumbers('十二点了')).toBe('12点了')
     expect(convertChineseNumbers('十点休息')).toBe('10点休息')
+  })
+
+  it('第 N 序号：第 + 单字数字 + 序数后缀 → 第N', () => {
+    expect(convertChineseNumbers('第二个')).toBe('第2个')
+    expect(convertChineseNumbers('第十个')).toBe('第10个')
+    expect(convertChineseNumbers('第一位')).toBe('第1位')
+    expect(convertChineseNumbers('第三名')).toBe('第3名')
+    expect(convertChineseNumbers('第一章第一节')).toBe('第1章第1节')
+    expect(convertChineseNumbers('第一位网友')).toBe('第1位网友')
+    // 含单位的多字序号由既有结构化整数规则负责，此处不重复
+    expect(convertChineseNumbers('第三十二条')).toBe('第32条')
+    expect(convertChineseNumbers('第一千零一夜')).toBe('第1001夜')
+  })
+
+  it('第 N 序号：不带序数后缀的「第 + 数字」不误转', () => {
+    expect(convertChineseNumbers('我排第一')).toBe('我排第一')
+    expect(convertChineseNumbers('排在第一的')).toBe('排在第一的')
+    expect(convertChineseNumbers('第一，我们要团结')).toBe('第一，我们要团结')
+  })
+
+  it('「第一次/第二次」时间副词不转（「次」不进序号后缀，避免误伤第一次世界大战等）', () => {
+    expect(convertChineseNumbers('我第一次听说这事')).toBe('我第一次听说这事')
+    expect(convertChineseNumbers('我第一次来北京')).toBe('我第一次来北京')
+    expect(convertChineseNumbers('这是我第一次')).toBe('这是我第一次')
+    expect(convertChineseNumbers('第一次世界大战')).toBe('第一次世界大战')
+  })
+
+  it('编号号码逐位串：不论是否带号码锚词，连续逐位串都逐字转（幺=1）', () => {
+    expect(convertChineseNumbers('房间号是二零零三')).toBe('房间号是2003')
+    expect(convertChineseNumbers('电话三三零六')).toBe('电话3306')
+    expect(convertChineseNumbers('编号一二三四')).toBe('编号1234')
+    expect(convertChineseNumbers('门牌号三零六')).toBe('门牌号306')
+    expect(convertChineseNumbers('手机号幺三八零零零幺')).toBe('手机号1380001')
+    expect(convertChineseNumbers('账号二零二四')).toBe('账号2024')
+    expect(convertChineseNumbers('工号是零零二')).toBe('工号是002')
+    expect(convertChineseNumbers('房间号一零一')).toBe('房间号101')
+    expect(convertChineseNumbers('二零零三开门')).toBe('2003开门')
   })
 
   it('空文本安全', () => {
