@@ -30,6 +30,8 @@ Open-source voice typing for Windows. Press a shortcut and speak—SayIt transcr
 >
 > This repository is a **personal fork of [`crosswk/SayIt`](https://github.com/crosswk/SayIt)**, customized by `skxingyu` to suit personal preferences in a specific direction. It is not the upstream release and is not maintained as a general distribution. For the official feature set and changelog, see the upstream project.
 >
+> **Special thanks to the original author [@crosswk](https://github.com/crosswk)**: SayIt and its excellent design are entirely the work of the original author. This project is a personal branch built on top of that work, and we sincerely thank them for it. 🙏
+>
 > Speech recognition in this version uses the **local model "qwen3 ASR 1.7B-提速版 (speed-boosted)"** for offline inference on the local GPU.
 >
 > **Changes vs. upstream (v0.1.9-1):**
