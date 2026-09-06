@@ -1190,6 +1190,7 @@
   "release.0.1.9.3": "In server mode, cleanup can now run on your own AI provider, so your text no longer passes through the SayIt server",
   "release.0.1.9.4": "Fixed the overlay sometimes jumping up and down",
   "release.0.1.9.5": "Speech recognition services now explain what they suit, so you no longer have to guess which to pick",
+  "release.0.1.9-1.1": "Stronger number normalization: digit-by-digit spoken strings (like 一零零二三, order IDs, passwords) are converted to Arabic numerals, matching how you actually speak numbers",
   "recorder.serverDisconnected": "The server isn't connected",
   "recorder.modelNotDownloaded": "Download the selected model in Settings first",
   "recorder.serviceNotReady": "The service isn't ready",

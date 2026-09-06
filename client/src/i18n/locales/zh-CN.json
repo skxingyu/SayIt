@@ -1190,6 +1190,7 @@
   "release.0.1.9.3": "服务器模式下，文字整理可以交给你自己配置的 AI，内容不再经过 SayIt 服务器",
   "release.0.1.9.4": "修复悬浮窗有时会上下跳动的问题",
   "release.0.1.9.5": "语音识别服务的说明写清楚了，不用再猜该选哪个",
+  "release.0.1.9-1.1": "数字规范化增强：逐字报出的数字串（如 一零零二三、订单号/密码）会转成阿拉伯数字，更贴合语音输入的习惯",
   "recorder.serverDisconnected": "服务器未连接",
   "recorder.modelNotDownloaded": "模型未下载，请先在设置里下载",
   "recorder.serviceNotReady": "服务未就绪",
