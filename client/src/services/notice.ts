@@ -98,7 +98,10 @@ export function normalizeRemoteNotice(value: unknown, locale: Locale): RemoteNot
   }
 }
 
-function matchesVersion(notice: RemoteNotice, current: string): boolean {
+// 导出只为测试：上面的 compareVersions 靠一个 `-` 取反来对齐本模块的比较方向，
+// 有人"顺手"删掉它，min/max 区间会两个方向完全反转（该看的看不到、不该看的弹出来），
+// 而没有其它测试会发现。这里必须有一条断言盯着这个方向。
+export function matchesVersion(notice: RemoteNotice, current: string): boolean {
   if (notice.minVersion && compareVersions(current, notice.minVersion) < 0) return false
   if (notice.maxVersion && compareVersions(current, notice.maxVersion) > 0) return false
   return true
