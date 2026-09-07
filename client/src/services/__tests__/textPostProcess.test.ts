@@ -155,6 +155,31 @@ describe('convertChineseNumbers', () => {
     expect(convertChineseNumbers('第一二三点')).toBe('第123点')
   })
 
+  it('两字组合不转（逐位串门槛 ≥3，约数/副词/单位不走报数路径）', () => {
+    // 约数：改了就是量级错误（「约七到八个」→ 78 个）
+    expect(convertChineseNumbers('七八个人')).toBe('七八个人')
+    expect(convertChineseNumbers('来了七八个人')).toBe('来了七八个人')
+    expect(convertChineseNumbers('过两三天')).toBe('过两三天')
+    expect(convertChineseNumbers('两三天后')).toBe('两三天后')
+    expect(convertChineseNumbers('三五分钟')).toBe('三五分钟')
+    expect(convertChineseNumbers('三五个人')).toBe('三五个人')
+    // 副词「一一」= 逐个，不是 11
+    expect(convertChineseNumbers('一一说明')).toBe('一一说明')
+    expect(convertChineseNumbers('一一列举')).toBe('一一列举')
+    expect(convertChineseNumbers('这些问题我一一回答')).toBe('这些问题我一一回答')
+    // 「二两」是重量单位
+    expect(convertChineseNumbers('二两肉')).toBe('二两肉')
+    // 并列而非报数
+    expect(convertChineseNumbers('一二年级')).toBe('一二年级')
+    expect(convertChineseNumbers('一二月')).toBe('一二月')
+    // 成语（不加黑名单，靠长度门槛自然免疫两字情形）
+    expect(convertChineseNumbers('乱七八糟')).toBe('乱七八糟')
+    // 三位及以上报数仍然转（门槛不能误伤真实报数）
+    expect(convertChineseNumbers('一零零二三版本')).toBe('10023版本')
+    expect(convertChineseNumbers('一二三四五')).toBe('12345')
+    expect(convertChineseNumbers('三三零六')).toBe('3306')
+  })
+
   it('孤立单字数字不转（避免拆坏 一起/一点 等词内单字与量词前单字）', () => {
     expect(convertChineseNumbers('一起走')).toBe('一起走')
     expect(convertChineseNumbers('一点水')).toBe('一点水')
