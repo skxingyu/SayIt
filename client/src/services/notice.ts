@@ -10,6 +10,7 @@
 import { getBackendBaseUrl } from './runtimeConfig'
 import { getSetting, setSetting } from './store'
 import { getLocale, type Locale } from '@/i18n'
+import { compareVersions as sharedCompareVersions } from '@/lib/version'
 
 export type NoticeLevel = 'info' | 'warning' | 'critical'
 
@@ -47,14 +48,13 @@ interface RemoteNoticePayload extends RemoteNotice {
 
 const DISMISSED_KEY = 'dismissedNoticeIds'
 
+// 版本比较复用自动更新那套规则（@/lib/version），不再各写一份：
+// 本地这份用 Number 解析，`Number('9-1')` 得 NaN 后被 `|| 0` 吞成 0，
+// 于是 `0.1.9-1` 被读成 `0.1.0` —— 该看到的公告看不到，不该看到的反而弹出来，
+// 两个方向都错。共享实现的返回方向是「b 比 a 新为正」，与本地旧实现的
+// 「a 比 b 新为正」相反，故取反，调用处不必改。
 function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0)
-    if (d !== 0) return d
-  }
-  return 0
+  return -sharedCompareVersions(a, b)
 }
 
 function isTranslation(value: unknown): value is RemoteNoticeTranslation {

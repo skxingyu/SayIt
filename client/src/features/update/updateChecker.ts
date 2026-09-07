@@ -1,6 +1,7 @@
 // 前端版本检查 — 直接请求后端 manifest API 比较版本号
 
 import { getOfficialUpdateBaseUrl, getUpdateBaseUrl, isOfficialUpdateChannel } from '@/services/runtimeConfig'
+import { compareVersions } from '@/lib/version'
 
 export interface VersionInfo {
   hasUpdate: boolean
@@ -18,29 +19,10 @@ export interface VersionInfo {
 /**
  * 返回 >0 表示 latest 比 current 新。
  *
- * 只认纯数字的点分段。非数字段（预发布后缀之类）按 0 处理而不是让 NaN 传下去：
- * NaN 参与减法永远得 NaN，`NaN !== 0` 为真，会让循环在第一段就返回 NaN，
- * 而 `NaN > 0` 是 false —— 结果是"有更新也不报"，且没有任何报错。
- *
- * 预发布号 `0.1.9-1` 里的 `-N` 先展开成第四段再比。不能把它留在第三段里：
- * `parseInt('9-1')` 得 9 而不是 NaN，于是 `0.1.9-1` 和 `0.1.9-2` 会被判成同一版本，
- * 之后发 `-2` 时用户点了"检查更新"也永远收不到提示，且没有任何报错。
- * 也不能把这种段整段按 0 处理 —— 那会把 `0.1.9-1` 读成 `0.1.0`，反比上游 `0.1.9` 旧，
- * 凭空报出一个不存在的更新。
+ * 实现在 `@/lib/version`（与远程公告共用一套比较规则）。这里保留导出是因为
+ * 本模块与 autoUpdate 都在用它，调用方不必关心它住在哪。
  */
-export function compareVersions(current: string, latest: string): number {
-  const parse = (value: string) => value.replace('-', '.').split('.').map((segment) => {
-    const parsed = /^\d+$/.test(segment) ? Number.parseInt(segment, 10) : Number.NaN
-    return Number.isFinite(parsed) ? parsed : 0
-  })
-  const a = parse(current)
-  const b = parse(latest)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const diff = (b[i] || 0) - (a[i] || 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
+export { compareVersions }
 
 /**
  * 检查更新。先问服务器设置里那个地址，拿不到有效 manifest 就回落到官方地址。
