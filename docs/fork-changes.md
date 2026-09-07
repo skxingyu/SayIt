@@ -10,6 +10,7 @@
 
 - 基于上游 `upstream/main` 于 `fcb0cc2`（"发布 0.1.9"）之后 fork。
 - 本 fork 最新版本：**`0.1.9-3`**（四段号 `0.1.9.1` 在 Cargo/npm semver 下非法，故用预发布号 `-N`）。
+  已发布：tag `v0.1.9-3` + [GitHub Release](https://github.com/skxingyu/SayIt/releases/tag/v0.1.9-3)（NSIS + 中/英 MSI），提交 `bf6399d`。
 - 改动跨度：`client/src/services/textPostProcess.ts`（数字规范化：先增强后收窄——位值词裸整数不转）、版本比较逻辑统一、`README` 重组、版本号、以及配套测试。
 
 ---
