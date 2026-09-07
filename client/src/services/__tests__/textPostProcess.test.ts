@@ -118,21 +118,18 @@ describe('convertChineseNumbers', () => {
     expect(convertChineseNumbers('千分之五')).toBe('5/1000')
   })
 
-  it('结构化整数（含位值词）', () => {
-    expect(convertChineseNumbers('扩容二十三台')).toBe('扩容23台')
-    expect(convertChineseNumbers('三百二十五块钱')).toBe('325块钱')
-    expect(convertChineseNumbers('端口号是三千三百零六')).toBe('端口号是3306')
-  })
-
-  it('口语省略末位', () => {
-    expect(convertChineseNumbers('大概一万五')).toBe('大概15000')
-    expect(convertChineseNumbers('花了三千二')).toBe('花了3200')
-    expect(convertChineseNumbers('两百五')).toBe('250')
-  })
-
-  it('零的间隔正确', () => {
-    expect(convertChineseNumbers('三千零二')).toBe('3002')
-    expect(convertChineseNumbers('一百零五')).toBe('105')
+  it('含位值词的裸整数不转（本 fork 偏好：位值词与成语/约数/量词同形，一律保留中文）', () => {
+    // 上游的「结构化整数」规则在本 fork 被刻意移除，rebase 时注意维持删除态
+    expect(convertChineseNumbers('扩容二十三台')).toBe('扩容二十三台')
+    expect(convertChineseNumbers('三百二十五块钱')).toBe('三百二十五块钱')
+    expect(convertChineseNumbers('端口号是三千三百零六')).toBe('端口号是三千三百零六')
+    expect(convertChineseNumbers('大概一万五')).toBe('大概一万五')
+    expect(convertChineseNumbers('花了三千二')).toBe('花了三千二')
+    expect(convertChineseNumbers('三千零二')).toBe('三千零二')
+    expect(convertChineseNumbers('十二个人')).toBe('十二个人')
+    // 成语/口语连带免疫（原本就靠规则4的过滤，现在天然不匹配）
+    expect(convertChineseNumbers('千万不要这样')).toBe('千万不要这样')
+    expect(convertChineseNumbers('万一出事了')).toBe('万一出事了')
   })
 
   it('不误伤成语/口语（无位值词或单位单独成段）', () => {
@@ -141,11 +138,6 @@ describe('convertChineseNumbers', () => {
     expect(convertChineseNumbers('千方百计')).toBe('千方百计')
     expect(convertChineseNumbers('十全十美')).toBe('十全十美')
     expect(convertChineseNumbers('百姓的生活')).toBe('百姓的生活')
-  })
-
-  it('不误伤连续单位黑名单词', () => {
-    expect(convertChineseNumbers('千万不要这样')).toBe('千万不要这样')
-    expect(convertChineseNumbers('万一出事了')).toBe('万一出事了')
   })
 
   it('无位值词的连续逐位串 → 逐字转阿拉伯（语音逐位报数场景）', () => {
@@ -225,9 +217,9 @@ describe('convertChineseNumbers', () => {
     expect(convertChineseNumbers('第三名')).toBe('第3名')
     expect(convertChineseNumbers('第一章第一节')).toBe('第1章第1节')
     expect(convertChineseNumbers('第一位网友')).toBe('第1位网友')
-    // 含单位的多字序号由既有结构化整数规则负责，此处不重复
-    expect(convertChineseNumbers('第三十二条')).toBe('第32条')
-    expect(convertChineseNumbers('第一千零一夜')).toBe('第1001夜')
+    // 含位值词的序号不转（位值词整数一律保留中文，见「含位值词的裸整数不转」块）
+    expect(convertChineseNumbers('第三十二条')).toBe('第三十二条')
+    expect(convertChineseNumbers('第一千零一夜')).toBe('第一千零一夜')
   })
 
   it('第 N 序号：不带序数后缀的「第 + 数字」不误转', () => {

@@ -9,29 +9,38 @@
 ## 0. 当前状态
 
 - 基于上游 `upstream/main` 于 `fcb0cc2`（"发布 0.1.9"）之后 fork。
-- 本 fork 最新版本：**`0.1.9-2`**（四段号 `0.1.9.1` 在 Cargo/npm semver 下非法，故用预发布号 `-N`）。
-- 改动跨度：`client/src/services/textPostProcess.ts`（数字规范化）、版本比较逻辑统一、`README` 重组、版本号、以及配套测试。
+- 本 fork 最新版本：**`0.1.9-3`**（四段号 `0.1.9.1` 在 Cargo/npm semver 下非法，故用预发布号 `-N`）。
+- 改动跨度：`client/src/services/textPostProcess.ts`（数字规范化：先增强后收窄——位值词裸整数不转）、版本比较逻辑统一、`README` 重组、版本号、以及配套测试。
 
 ---
 
 ## 1. 改动清单（按主题）
 
-### A. 数字规范化增强 — `client/src/services/textPostProcess.ts`
+### A. 数字规范化改造 — `client/src/services/textPostProcess.ts`
 
-**目的**：语音逐位报数时把他读的数字串转成阿拉伯数字，并修正约数被误转的问题。
+**目的**：先（0.1.9-1/-2）把语音逐位报数的数字串转成阿拉伯数字并修正约数误转；后（0.1.9-3）按用户偏好**收窄**——含位值词的裸整数不再换算。
 
-**具体改动**：
-- **规则 4.5（逐位串）**：把「无位值词的中文数字连续串」逐字映射成阿拉伯数字。
-  - 正则长度门槛 **`{3,}`**（原为上游的 `{2,}` 思路不适用本 fork）。理由：两字组合在中文里绝大多数是约数/副词而非报数——
-    `七八个人`、`过两三天`、`三五分钟`、`一一说明`、`二两肉`、`乱七八糟`、`一二年级` 都**不转**；
+**当前形态（0.1.9-3）**：
+- **位值词裸整数不转（0.1.9-3 起，上游「结构化整数」规则被整体删除）**：`三千 → 三千`、`三百二十五 → 三百二十五`、`一万五 → 一万五`、`三千零二 → 三千零二`。
+  位值词（十百千万亿）与成语（千方百计）、约数、量词结构同形，用户明确只要带明确格式信号的场域才转。
+  随删除一并移除的：`containsUnit`、`INTEGER_BLACKLIST`、`UNIT_CHARS`（`parseChineseInteger` 与大小单位表**保留**，百分比/分之/时间/小数/第N规则仍在用）。
+- **保留的转换场域**（均为带格式信号或纯字符映射）：
+  - 百分比：`百分之三十 → 30%`、`百分之三点五 → 3.5%`
+  - 分之：`五分之二 → 2/5`、`千分之五 → 5/1000`
+  - 时间：`九点三十二分 → 9点32分`、`下午两点半 → 2点半`（无时间信号的裸「九点」不转）
+  - 小数/多段点分：`三点一四 → 3.14`、`零点一点零 → 0.1.0`
+  - **逐位串（现规则 4）**：无位值词的连续中文数字串逐字映射，长度门槛 **`{3,}`**（原为上游的 `{2,}` 思路不适用本 fork）。
+    理由：两字组合绝大多数是约数/副词——`七八个人`、`过两三天`、`三五分钟`、`一一说明`、`二两肉`、`乱七八糟`、`一二年级` 都**不转**；
     真实逐位报数几乎 ≥3 位（`一零零二三 → 10023`、`一二三四五 → 12345`、`三三零六 → 3306`）照常转。
-  - 已知可接受边界（写入了代码注释）：四字成语 `三三两两 → 3322` 仍会转（用户明确**不加**成语黑名单）；两位数报数（说「一二」想得到 12）不再转。
-- **规则 5（第 N 序号）**：`第 + 单字数字 + 序数后缀` → `第N`。`ORD_SUFFIX = '个名位号批轮期章节条目页项'`，**刻意不含 `次`**（避免误转「第一次/第二次世界大战」）。
-- 单字数字不转（「三个→三个」「一起→一起」），与成语语素同形无法可靠判别。
+  - **「第 N」序号（规则 5）**：`第 + 单字数字 + 序数后缀` → `第N`。`ORD_SUFFIX = '个名位号批轮期章节条目页项'`，**刻意不含 `次`**（避免误转「第一次/第二次世界大战」）。
+    含位值词的序号（`第三十二条`、`第一千零一夜`）随位值词整数规则**不转**（0.1.9-3 起）。
+- **单字数字不转**（`三个→三个`、`一起→一起`），与成语语素同形无法可靠判别；`幺→1` 等单字映射也**不做**（0.1.9-3 用户确认：易歧义一律不转）。
+- 已知可接受边界（写入了代码注释）：四字成语 `三三两两 → 3322` 仍会转（用户明确**不加**成语黑名单）；两位数报数（说「一二」想得到 12）不再转。
 
 **同步上游时注意**：
-- 上游若也改了 `convertChineseNumbers`（很可能，原版数字规范化较保守），rebase 时此处**必冲突**。
-- 决策原则：保留本 fork 的「门槛 `{3,}` + 约数免疫 + `次` 不进后缀」这几个偏好，把上游新增的有益规则（如上游可能补的新后缀、新边界）**追加**进来，而非整体覆盖。
+- 上游若改了 `convertChineseInteger` 的「结构化整数」规则（原规则 4），本 fork **维持删除态**——不要把上游的结构化整数恢复回来。
+- 上游若也改了逐位串/序号逻辑，rebase 时**必冲突**。
+- 决策原则：保留本 fork 的「位值词不转 + 门槛 `{3,}` + 约数免疫 + `次` 不进后缀」偏好，把上游新增的有益规则（如新后缀、新边界）**追加**进来，而非整体覆盖。
 - 改完务必同步更新 `client/src/services/__tests__/textPostProcess.test.ts`（正向 + 负向用例都已钉住）。
 
 ### B. 版本比较统一 — `client/src/lib/version.ts`（新增）+ `updateChecker.ts` + `notice.ts`
@@ -55,7 +64,7 @@
   - 若上游改用第三方库（如 `semver`）→ 评估是否跟随上游，但需保证 `version.ts` 的测试（`version.test.ts`）仍全绿，且 notice 的 `matchesVersion` 测试仍全绿。
 - 守护测试：`client/src/lib/__tests__/version.test.ts`、`client/src/services/__tests__/notice.test.ts` 的 `matchesVersion`（注意：`matchesVersion` 被 **export** 就是为了让测试钉住那个负号）。
 
-### C. 版本号提升到 `0.1.9-2`
+### C. 版本号提升到 `0.1.9-3`
 
 **改动文件（6 处必须同时改）**：
 1. `client/package.json`
@@ -162,27 +171,29 @@ gh release create v<本fork版本> --repo skxingyu/SayIt \
 
 ## 5. 本 fork 相对上游的完整文件差异
 
-> 用 `git diff upstream/main...HEAD` 随时查看最新全量差异。截至 `0.1.9-2` 的改动文件：
+> 用 `git diff upstream/main...HEAD` 随时查看最新全量差异。截至 `0.1.9-3` 的改动文件：
 
 ```
 README.md                          # 中文主文档（原 zh-CN 并入）
 README.en.md                       # 英文补充（原 README.md 英文）
 README.zh-CN.md                    # 已删除
-client/package.json                # 版本 0.1.9-2
-client/src-tauri/Cargo.toml        # 版本 0.1.9-2
+AGENTS.md                          # 项目规则（fork 专属坑与约束）
+docs/fork-changes.md               # 本文档
+client/package.json                # 版本 0.1.9-3
+client/src-tauri/Cargo.toml        # 版本 0.1.9-3
 client/src-tauri/Cargo.lock        # sayit 条目版本
-client/src-tauri/tauri.conf.json   # 版本 0.1.9-2
+client/src-tauri/tauri.conf.json   # 版本 0.1.9-3
 client/src/features/update/releaseHighlights.ts       # 版本 + 亮点文案
 client/src/features/update/updateChecker.ts           # 复用共享 compareVersions
 client/src/features/update/__tests__/releaseHighlights.test.ts  # 新增
-client/src/i18n/locales/en.json    # release.0.1.9-1.1 / 0.1.9-2.1
+client/src/i18n/locales/en.json    # release.0.1.9-1.1 / 0.1.9-2.1 / 0.1.9-3.1
 client/src/i18n/locales/zh-CN.json  # 同上
 client/src/lib/version.ts          # 新增：唯一版本比较实现
 client/src/lib/__tests__/version.test.ts            # 新增
 client/src/services/notice.ts      # 复用共享实现（取反）
 client/src/services/__tests__/notice.test.ts       # 加 matchesVersion 断言
-client/src/services/textPostProcess.ts              # 规则 4.5 门槛 {3,} + 规则 5
-client/src/services/__tests__/textPostProcess.test.ts  # 加负向用例
+client/src/services/textPostProcess.ts              # 位值词裸整数不转（0.1.9-3 删上游规则4）+ 逐位串门槛 {3,} + 规则 5
+client/src/services/__tests__/textPostProcess.test.ts  # 正负向用例
 ```
 
 ---
