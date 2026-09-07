@@ -1191,6 +1191,7 @@
   "release.0.1.9.4": "Fixed the overlay sometimes jumping up and down",
   "release.0.1.9.5": "Speech recognition services now explain what they suit, so you no longer have to guess which to pick",
   "release.0.1.9-1.1": "Stronger number normalization: digit-by-digit spoken strings (like 一零零二三, order IDs, passwords) are converted to Arabic numerals, matching how you actually speak numbers",
+  "release.0.1.9-2.1": "More accurate number normalization: spoken digit runs still convert, while approximations like 七八个人 (about seven or eight) are left alone; fixed update checks and notices misbehaving with prerelease version numbers",
   "recorder.serverDisconnected": "The server isn't connected",
   "recorder.modelNotDownloaded": "Download the selected model in Settings first",
   "recorder.serviceNotReady": "The service isn't ready",
