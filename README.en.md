@@ -34,8 +34,8 @@ Open-source voice typing for Windows. Press a shortcut and speak—SayIt transcr
 >
 > Speech recognition in this version uses the **local model "qwen3 ASR 1.7B-提速版 (speed-boosted)"** for offline inference on the local GPU.
 >
-> **Changes vs. upstream (v0.1.9-1):**
-> - **Enhanced number normalization**: in addition to converting Chinese numeral words to Arabic digits, supports digit-by-digit spoken runs (e.g. 「一零零二三」→ `10023`, plain 「一二三四五」→ `12345`) and ordinal forms like 「第 N 个/名/号/批/轮/期/章/节/条/目/页/项」. These follow personal taste. See [`textPostProcess.ts`](client/src/services/textPostProcess.ts) and its [unit tests](client/src/services/__tests__/textPostProcess.test.ts).
+> **Changes vs. upstream (synced to upstream v0.2.0):**
+> - **Narrowed number normalization**: bare integers with place-value words (十百千万亿) stay in Chinese (`三千 → 三千`, `三百二十五 → 三百二十五`, `一万五 → 一万五`). Only clearly formatted forms convert to Arabic digits — percentages (`百分之三十 → 30%`), fractions (`五分之二 → 2/5`), times (`九点三十二分 → 9点32分`), decimals / dotted runs (`三点一四 → 3.14`), digit-by-digit spoken runs (`一零零二三 → 10023`, `一二三四五 → 12345`), and ordinals like 「第 N 个/名/号/批/轮/期/章/节/条/目/页/项」. Approximations, measure words and idioms (`七八个人`, `过两三天`, `乱七八糟`) are left alone. See [`textPostProcess.ts`](client/src/services/textPostProcess.ts) and its [unit tests](client/src/services/__tests__/textPostProcess.test.ts).
 
 ## Why SayIt?
 
