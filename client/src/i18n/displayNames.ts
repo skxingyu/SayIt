@@ -73,6 +73,8 @@ const HISTORY_FAILURE_KEYS: Record<HistoryFailReasonCode, TranslationKey> = {
   provider_rate_limit: 'err.provider.rateLimit',
   provider_no_model: 'err.provider.noModel',
   provider_failed: 'record.providerFailed',
+  processing_timeout: 'recorder.processingTimeout',
+  connection_lost: 'recorder.connectionLost',
 }
 
 /** 内置模式名由稳定 id 翻译；用户自建名称永远原样显示。 */

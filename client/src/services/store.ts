@@ -82,6 +82,10 @@ export type HistoryFailReasonCode =
   | 'provider_rate_limit'
   | 'provider_no_model'
   | 'provider_failed'
+  /** 等结果等到超时，一个字都没回来（音频已存档，可重新识别）。 */
+  | 'processing_timeout'
+  /** 录音期间或发送时连接已断开，这段语音从未送达服务端。 */
+  | 'connection_lost'
 
 export interface Stats {
   totalDurationSec: number
