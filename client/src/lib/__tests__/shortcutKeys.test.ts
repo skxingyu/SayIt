@@ -39,6 +39,27 @@ describe('PTT 物理组合键', () => {
     expect(PTT_CODE_TO_VK.KeyK).toBe(0x4b)
   })
 
+  // F13–F24 是给可编程键盘 / 自制 HID 语音设备当专用触发键用的（物理键盘上没有这些键，
+  // 因此几乎不与任何程序冲突）。
+  //
+  // 这条断言与 Rust 的 function_keys_f1_through_f24_are_all_present_with_contiguous_vks
+  // 对称：两张表是手写副本，只改一边是静默失败 —— 前端放行 F13、Rust 查不到它，
+  // 用户界面上显示 F13，实际说话键会悄悄回落成右 Ctrl。
+  it('F1–F24 全部可用，vk 连续且可单独作为按住说话键', () => {
+    for (let n = 1; n <= 24; n += 1) {
+      const code = `F${n}`
+      expect(PTT_CODE_TO_VK[code], `${code} 应当在按键表里`).toBe(0x70 + n - 1)
+      expect(isValidPTTShortcut(code), `${code} 应当可以单独当按住说话键`).toBe(true)
+    }
+    // 语言中立的键名不进 locale，直接用表里的 label
+    expect(displayPTTShortcut('F13')).toEqual(['F13'])
+    expect(displayPTTShortcut('F24')).toEqual(['F24'])
+    // 也能当组合成员；Alt+F4 那条保留组合只匹配 F4，不牵连 F13–F24
+    expect(isValidPTTShortcut('ControlLeft+F13')).toBe(true)
+    expect(isValidPTTShortcut('AltLeft+F13')).toBe(true)
+    expect(getPTTShortcutValidationError('AltLeft+F4')).not.toBeNull()
+  })
+
   it('拒绝单独 Win、裸字母、多主键和危险系统组合', () => {
     expect(getPTTShortcutValidationError('MetaLeft')).toContain('不能单独')
     expect(getPTTShortcutValidationError('KeyK')).toContain('不能单独')

@@ -20,6 +20,7 @@ export type {
   AiExecutionSource,
   AiExecutionStatus,
 } from './types'
+export { MID_SESSION_DISCONNECT_ERROR } from './types'
 
 let currentProvider: TranscriptionProvider | null = null
 let currentMode: WorkMode = 'server'

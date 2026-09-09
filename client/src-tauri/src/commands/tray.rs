@@ -6,7 +6,7 @@
 use crate::storage::Storage;
 use serde_json::json;
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, State,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State,
     WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
@@ -83,8 +83,13 @@ pub fn show_tray_menu(app: &AppHandle, position: PhysicalPosition<f64>) {
         })
         .unwrap_or((0.0, 0.0, 1920.0, 1080.0, 1.0));
 
-    let width = TRAY_MENU_WIDTH * scale;
-    let height = TRAY_MENU_HEIGHT * scale;
+    // TRAY_MENU_* 是 CSS px 的设计尺寸，不是能直接乘 scale 的逻辑尺寸：webview 里 1 CSS px
+    // 可能是 `scale × css_zoom` 个设备像素（Windows 辅助功能的文本大小会被 WebView2 当页面
+    // 缩放叠上来）。少乘这一份，菜单内容就会从底部溢出、被 .tray-menu-shell 的
+    // overflow:hidden 裁掉——3 个 30px 的条目加分隔线本来只剩 1px 余量，「退出」会被切掉。
+    let css_zoom = app.state::<crate::window::WindowState>().css_zoom();
+    let width = TRAY_MENU_WIDTH * css_zoom * scale;
+    let height = TRAY_MENU_HEIGHT * css_zoom * scale;
     let gap = 8.0 * scale;
     let edge = 8.0 * scale;
     let monitor_width = right - left;
@@ -104,9 +109,11 @@ pub fn show_tray_menu(app: &AppHandle, position: PhysicalPosition<f64>) {
     x = x.clamp(left + edge, (right - width - edge).max(left + edge));
     y = y.clamp(top + edge, (bottom - height - edge).max(top + edge));
 
-    let _ = window.set_size(Size::Logical(LogicalSize::new(
-        TRAY_MENU_WIDTH,
-        TRAY_MENU_HEIGHT,
+    // 用物理像素设尺寸：上面的定位算的就是物理像素，走 Logical 会用窗口自己当前的
+    // scale 再换算一遍，跨显示器移动时两者可能不是同一个值。ceil 同理不留取整亏损。
+    let _ = window.set_size(Size::Physical(PhysicalSize::new(
+        width.ceil() as u32,
+        height.ceil() as u32,
     )));
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(
         x.round() as i32,

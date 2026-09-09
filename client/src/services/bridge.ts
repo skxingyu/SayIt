@@ -88,8 +88,10 @@ export function updateOverlay(data: unknown) {
   })
 }
 
-export function overlayReady() {
-  return invoke<void>('overlay_ready')
+// devicePixelRatio 在这里就上报：预热时（还没有任何一次显示）是原生侧唯一能在第一次
+// 显示之前拿到 webview 真实缩放的时机，否则用户第一次口述会看到尺寸不对的悬浮窗。
+export function overlayReady(devicePixelRatio?: number) {
+  return invoke<void>('overlay_ready', { devicePixelRatio })
 }
 
 export function overlayRenderAck(data: unknown) {

@@ -9,6 +9,7 @@ import {
   loadServerAiSource,
   type ServerAiSource,
 } from './serverAiSource'
+import { MID_SESSION_DISCONNECT_ERROR } from './types'
 import type {
   FinalResult,
   TranscriptionProvider,
@@ -47,6 +48,20 @@ export class ServerProvider implements TranscriptionProvider {
     await ws.connect({
       onStateChange: (state) => {
         callbacks.onStateChange?.(state)
+        // 连接在一次录音进行中掉了：必须当场报出去。
+        //
+        // 以前这里只是转发状态、没人处理，于是录音继续跑（音频被 sendAudio 静静丢掉），
+        // 停止时 sendStop 也发不出去，录音器照旧进入 45 秒超时等待 —— 用户看着悬浮条转
+        // 一分钟，最后什么提示都没有。实测 2026-09-07 两段长录音都是这么没的。
+        if (state !== 'disconnected' && state !== 'error') return
+        const runId = this.activeRunId
+        if (runId === 0) return
+        addRuntimeEvent('error', 'server', 'Connection dropped during an active recording', {
+          runId,
+          state,
+        })
+        this.resetRun()
+        callbacks.onError?.(MID_SESSION_DISCONNECT_ERROR)
       },
       onReady: (data) => {
         callbacks.onReady?.({

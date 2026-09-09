@@ -8,10 +8,10 @@
 
 ## 0. 当前状态
 
-- 基于上游 `upstream/main` 于 `fcb0cc2`（"发布 0.1.9"）之后 fork。
-- 本 fork 最新版本：**`0.1.9-3`**（四段号 `0.1.9.1` 在 Cargo/npm semver 下非法，故用预发布号 `-N`）。
-  已发布：tag `v0.1.9-3` + [GitHub Release](https://github.com/skxingyu/SayIt/releases/tag/v0.1.9-3)（NSIS + 中/英 MSI），提交 `bf6399d`。
-- 改动跨度：`client/src/services/textPostProcess.ts`（数字规范化：先增强后收窄——位值词裸整数不转）、版本比较逻辑统一、`README` 重组、版本号、以及配套测试。
+- 已同步上游 `v0.2.0`（合并 `upstream/main` @ `eab25fd`，tag `v0.2.0`）。
+- 本 fork 最新版本：**`0.2.0-1`**（上游到 `0.2.0`，本 fork 在其上预发布号 `-N`；四段号在 Cargo/npm semver 下非法）。
+- 合并方式：本次用了 **`git merge upstream/main`**（而非 §4 模板的 rebase），原因见 §4「合并 vs rebase」说明。
+- 改动跨度：合并上游 0.2.0 全部改动（F13–F24 录音快捷键、录音松开即落盘、悬浮窗/托盘随系统文本大小缩放、AI 润色默认关闭思考等），本 fork 的 `textPostProcess.ts`（数字规范化收窄）+ `version.ts`/`updateChecker.ts`/`notice.ts`（版本比较统一）及守护测试**原样保留**。
 
 ---
 
@@ -128,6 +128,11 @@
 
 ## 4. 同步步骤（上游更新时操作模板）
 
+> **合并 vs rebase（v0.2.0 同步经验）**：本 fork 的 `0.1.9-1/-2/-3` 是一套**独立于上游的发布生命周期**，当上游已升到更高版本（如 0.2.0）时，若 rebase，旧版号提交会在每次 replay 时与上游更高版号打架（每个 bump 都冲突且方向相反），纯属自找麻烦。
+> 这种「两侧各自独立发版后要合并」的情形，用 **`git merge upstream/main`** 更干净：只有真正重叠的文件（README、版本号 6 处）冲突一次，text/version 逻辑代码因上游没动会自动干净合并。
+> 只有当 fork 上次已同步到与上游同基线（fork 只有单次增量、上游在其后小步前进）时，rebase 才合适。
+> 用 merge 的话，下次同步如果又是「独立生命周期交叉」，继续 merge；若已回到同基线可改回 rebase。
+
 ```bash
 cd C:/Users/skxingyu/Desktop/AI/SayIt
 
@@ -135,17 +140,23 @@ cd C:/Users/skxingyu/Desktop/AI/SayIt
 git fetch upstream
 git fetch origin
 
-# 2. 在干净的 fork main 上 rebase 到上游（冲突时逐个解决，参考 §3 矩阵）
+# 2a. （两侧独立发版、fork 旧版号低于上游）用 merge：
 git checkout main
-git rebase upstream/main
-#   冲突重点：textPostProcess.ts / version.ts / README.md / 版本号 6 处
+git merge upstream/main
+#     冲突重点：README.md / 版本号 6 处（textPostProcess/version/notice/updateChecker 上游没动则自动干净）
 
-# 3. 解完冲突后，重新 bump 本 fork 版本号（见 C 节 6 处）
+# 2b. （fork 已与上游同基线，只有单次增量）才用 rebase：
+# git checkout main
+# git rebase upstream/main
+#     冲突重点同 2a，另见 §3 矩阵
+
+# 3. 合并后统一解决版本冲突，再 bump 本 fork 版本号（见 C 节 6 处）
 #    taureg.conf.json 与 releaseHighlights.version 必须逐字相等
+#    本次：上游 0.2.0 → 本 fork 0.2.0-1
 
 # 4. 校验
 cd client
-npx vitest run          # 约 340+ 用例全绿
+npx vitest run          # 约 341 用例全绿
 npx tsc --noEmit        # 无类型错误
 node scripts/check-i18n.mjs --strict   # 无中文串遗漏
 
@@ -153,9 +164,9 @@ node scripts/check-i18n.mjs --strict   # 无中文串遗漏
 #    在另一个 shell 里：
 cmd //c "C:\code\env\vc_tauri.cmd build"
 
-# 6. 提交并推 fork
+# 6. 提交并推 fork（merge 时先提交 merge 结果）
 git add -A
-git commit -m "chore: 同步上游 <上游版本>，本 fork 升至 <本fork版本>"
+git commit -m "merge: 同步上游 <上游版本>，本 fork 升至 <本fork版本>"
 git push origin main
 
 # 7. 打 tag + 发 release（注意 --repo 指向 fork）
@@ -172,28 +183,29 @@ gh release create v<本fork版本> --repo skxingyu/SayIt \
 
 ## 5. 本 fork 相对上游的完整文件差异
 
-> 用 `git diff upstream/main...HEAD` 随时查看最新全量差异。截至 `0.1.9-3` 的改动文件：
+> 用 `git diff upstream/main...HEAD` 随时查看最新全量差异。截至 `0.2.0-1`（同步上游 0.2.0）本 fork 相对上游的改动文件（仅列 fork 定向部分，上游 0.2.0 自带改动不在此列）：
 
 ```
-README.md                          # 中文主文档（原 zh-CN 并入）
-README.en.md                       # 英文补充（原 README.md 英文）
+README.md                          # 中文主文档（原 zh-CN 并入）+ 自用版说明
+README.en.md                       # 英文补充（含上游新增的 Community/微信群段）
 README.zh-CN.md                    # 已删除
 AGENTS.md                          # 项目规则（fork 专属坑与约束）
+CHANGELOG.md                       # 顶部新增 fork 0.2.0-1 段
 docs/fork-changes.md               # 本文档
-client/package.json                # 版本 0.1.9-3
-client/src-tauri/Cargo.toml        # 版本 0.1.9-3
+client/package.json                # 版本 0.2.0-1
+client/src-tauri/Cargo.toml        # 版本 0.2.0-1
 client/src-tauri/Cargo.lock        # sayit 条目版本
-client/src-tauri/tauri.conf.json   # 版本 0.1.9-3
-client/src/features/update/releaseHighlights.ts       # 版本 + 亮点文案
+client/src-tauri/tauri.conf.json   # 版本 0.2.0-1
+client/src/features/update/releaseHighlights.ts       # 版本 0.2.0-1 + 亮点文案（含数字规范化项）
 client/src/features/update/updateChecker.ts           # 复用共享 compareVersions
 client/src/features/update/__tests__/releaseHighlights.test.ts  # 新增
-client/src/i18n/locales/en.json    # release.0.1.9-1.1 / 0.1.9-2.1 / 0.1.9-3.1
+client/src/i18n/locales/en.json    # release.0.2.0.* + release.0.2.0-1.1
 client/src/i18n/locales/zh-CN.json  # 同上
 client/src/lib/version.ts          # 新增：唯一版本比较实现
 client/src/lib/__tests__/version.test.ts            # 新增
 client/src/services/notice.ts      # 复用共享实现（取反）
 client/src/services/__tests__/notice.test.ts       # 加 matchesVersion 断言
-client/src/services/textPostProcess.ts              # 位值词裸整数不转（0.1.9-3 删上游规则4）+ 逐位串门槛 {3,} + 规则 5
+client/src/services/textPostProcess.ts              # 位值词裸整数不转（删上游规则4）+ 逐位串门槛 {3,} + 规则 5
 client/src/services/__tests__/textPostProcess.test.ts  # 正负向用例
 ```
 

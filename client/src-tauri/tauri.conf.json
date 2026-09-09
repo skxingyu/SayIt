@@ -1,6 +1,6 @@
 {
   "productName": "SayIt",
-  "version": "0.1.9-3",
+  "version": "0.2.0-1",
   "identifier": "com.sayit.app",
   "build": {
     "frontendDist": "../dist",

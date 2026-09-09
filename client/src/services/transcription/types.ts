@@ -8,6 +8,16 @@ export type WorkMode = 'server' | 'cloud_api' | 'local'
 
 export type ProviderState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+/**
+ * 一次录音进行中连接掉线的哨兵错误。
+ *
+ * 走 onError 的统一失败通道（这样音频存档/历史/提示都复用同一条路），但录音器要能把它
+ * 单独归类成 connection_lost —— 这段语音是**从未送达**服务端，跟「服务端处理失败」
+ * 不是一回事，用户看到的解释也不该相同。
+ */
+export const MID_SESSION_DISCONNECT_ERROR
+  = 'sayit_error:server_unreachable:websocket disconnected mid-session'
+
 export type AiExecutionSource = 'server' | 'custom' | 'none'
 export type AiExecutionStatus = 'applied' | 'skipped' | 'unavailable' | 'failed'
 

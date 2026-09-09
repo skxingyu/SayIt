@@ -229,6 +229,11 @@ export default function Overlay() {
           const rootRect = root?.getBoundingClientRect()
           const contentRect = content?.getBoundingClientRect()
           const style = content ? window.getComputedStyle(content) : null
+          // 内容顶部越到视口上方多少 CSS px。overlay.html 给 html/body/#root 设了
+          // overflow:hidden，所以这一段是**真的被裁掉**，不是滚出去了还能拉回来。
+          // healthy 不看它（悬浮窗被裁一条仍然在工作），但必须上报：否则被裁成什么样
+          // 日志里都只有一行 render ack OK。
+          const clippedTop = contentRect ? Math.max(0, -contentRect.top) : 0
           const healthy = Boolean(
             rootRect && contentRect
             && rootRect.width > 0 && rootRect.height > 0
@@ -247,6 +252,13 @@ export default function Overlay() {
             rootHeight: rootRect?.height ?? 0,
             contentWidth: contentRect?.width ?? 0,
             contentHeight: contentRect?.height ?? 0,
+            clippedTop,
+            // 原生侧按「逻辑像素 × 显示器 scale」定窗口大小，但 webview 的 1 CSS px 可能是
+            // `显示器 scale × 额外缩放` 个设备像素（Windows 的文本大小设置会被 WebView2
+            // 当页面缩放叠上来）。把 dpr 和真实视口报上去，原生侧才能把窗口开够。
+            devicePixelRatio: window.devicePixelRatio,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
             display: style?.display ?? 'missing',
             visibility: style?.visibility ?? 'missing',
             opacity: style?.opacity ?? 'missing',
@@ -262,7 +274,7 @@ export default function Overlay() {
           return
         }
         removeOverlayListener = unlisten
-        void bridge.overlayReady().catch(() => { })
+        void bridge.overlayReady(window.devicePixelRatio).catch(() => { })
       })
 
     return () => {
