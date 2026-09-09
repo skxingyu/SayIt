@@ -164,6 +164,12 @@ const SINGLE_KEY_TABLE: &[(&str, u32)] = &[
     ("F1", 0x70), ("F2", 0x71), ("F3", 0x72), ("F4", 0x73),
     ("F5", 0x74), ("F6", 0x75), ("F7", 0x76), ("F8", 0x77),
     ("F9", 0x78), ("F10", 0x79), ("F11", 0x7A), ("F12", 0x7B),
+    // F13–F24：物理键盘上没有这些键，因此几乎不与任何程序的快捷键冲突，
+    // 适合可编程键盘 / 自制 HID 语音设备当专用触发键。
+    // 这一段在幻影过滤里有例外，见 is_injection_exempt_vk。
+    ("F13", 0x7C), ("F14", 0x7D), ("F15", 0x7E), ("F16", 0x7F),
+    ("F17", 0x80), ("F18", 0x81), ("F19", 0x82), ("F20", 0x83),
+    ("F21", 0x84), ("F22", 0x85), ("F23", 0x86), ("F24", 0x87),
 ];
 
 fn ptt_modifier_family(code: &str) -> Option<&'static str> {
@@ -340,6 +346,21 @@ fn is_mouse_button_setting(setting: &str) -> bool {
 /// 若日后往 SINGLE_KEY_TABLE 里加第四个鼠标键，这里也要跟着加（有测试钉住）。
 fn is_mouse_vk(vk: u32) -> bool {
     matches!(vk, 0x04 | 0x05 | 0x06)
+}
+
+/// 幻影过滤的例外键：即使带「注入」标志或 scanCode==0，也照常当用户按键处理。
+///
+/// 幻影过滤真正要防的是 Windows 菜单导航合成出来的假 Alt（与真实按键几乎无法区分，
+/// 只能靠 injected 标志和 scanCode==0 识别）。下面这些键都不可能是那种幻影，而它们的
+/// **正常来源恰恰就是注入**，按幻影丢弃只会让用户绑了不生效：
+///   · BrowserBack / BrowserForward（0xA6/0xA7）：罗技等鼠标驱动把侧键改写成它们。
+///   · F13–F24（0x7C–0x87）：物理键盘上不存在这些键，用户要按出来只有两条路 ——
+///     可编程键盘 / HID 固件直接发（真键，本来就能过），或者用 AutoHotkey、PowerToys
+///     键盘管理器、外设驱动宏把别的键映射过来。后者走 SendInput，带 injected 标志；
+///     不开例外的话这类用户会遇到「绑得上、按下去没反应、日志里也没有任何记录」，
+///     排查起来毫无线索。误判的代价只是某个程序模拟 F13 时多弹一次悬浮窗。
+fn is_injection_exempt_vk(vk: u32) -> bool {
+    matches!(vk, 0xA6 | 0xA7) || (0x7C..=0x87).contains(&vk)
 }
 
 #[allow(dead_code)]
@@ -1693,12 +1714,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
         }
 
         // 幻影过滤：注入或 scanCode==0 视为系统合成键，放行、不当作用户按键。
-        // 例外：浏览器后退/前进（0xA6/0xA7）常由鼠标驱动“注入”，不能按幻影丢弃——
-        // 否则绑成侧键后按下不生效；它们不会是“幻影 Alt”，放行进入匹配是安全的。
+        // 例外见 is_injection_exempt_vk（侧键改写键、F13–F24）——这些键的正常来源就是
+        // 注入，按幻影丢弃会让用户绑了不生效，且不留任何日志线索。
         let is_synthetic = ((kb.flags.0 & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) != 0
             || kb.scanCode == 0)
-            && vk != 0xA6
-            && vk != 0xA7;
+            && !is_injection_exempt_vk(vk);
         if is_synthetic {
             // 只接受“已有真实 PTT down”的合成抬起作为释放信号。Windows 辅助功能、
             // 远程桌面或驱动可能把配对 up 标成 injected/scanCode=0；此前在这里直接
@@ -1976,8 +1996,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
 mod tests {
     use super::{
         begin_hf_press, begin_ptt_press, claim_ptt_release, complete_ptt_release, end_hf_press,
-        is_mouse_button_setting, is_mouse_vk, press_ptt_member, ptt_key_config, release_ptt_member,
-        should_consume_combo_main_down, DEFAULT_PTT_SETTING, DEFAULT_PTT_VK, SINGLE_KEY_TABLE,
+        is_injection_exempt_vk, is_mouse_button_setting, is_mouse_vk, press_ptt_member,
+        ptt_key_config, release_ptt_member, should_consume_combo_main_down, DEFAULT_PTT_SETTING,
+        DEFAULT_PTT_VK, SINGLE_KEY_TABLE,
     };
     #[cfg(windows)]
     use super::queue_ptt_release;
@@ -2200,5 +2221,54 @@ mod tests {
             assert_eq!(config.setting, single, "{single} 应当是有效的单键设置");
             assert_eq!(config.vk_codes.len(), 1, "{single} 应当只有一个成员");
         }
+    }
+
+    /// F1–F24 必须全部在表里、且 vk 连续等于 0x70 + (n-1)。
+    ///
+    /// 这张表与前端 `lib/shortcutKeys.ts` 的 `SINGLE_KEYS` 是两份手写副本，只改一边
+    /// 是**静默失败**：前端放行 F13、Rust 查不到它，`ptt_key_config` 的 valid_shape
+    /// 落空后走 `fallback()` —— 用户界面上显示 F13，实际说话键悄悄变成右 Ctrl，
+    /// 编译和其它测试都不报错。TS 侧有一条对称的断言。
+    #[test]
+    fn function_keys_f1_through_f24_are_all_present_with_contiguous_vks() {
+        for n in 1..=24_u32 {
+            let code = format!("F{n}");
+            let expected_vk = 0x70 + n - 1;
+            let found = SINGLE_KEY_TABLE
+                .iter()
+                .find(|(setting, _)| *setting == code.as_str());
+            let Some((_, vk)) = found else {
+                panic!("{code} 不在 SINGLE_KEY_TABLE 里（前端 SINGLE_KEYS 有 F1–F24，两边必须一致）");
+            };
+            assert_eq!(
+                *vk, expected_vk,
+                "{code} 的 vk 应当是 {expected_vk:#04x}（VK_F1..VK_F24 是连续的）",
+            );
+
+            // 解析必须真的接受它，而不是回落到默认键。
+            let config = ptt_key_config(&code);
+            assert_eq!(config.setting, code, "{code} 应当被接受为有效单键，而不是回落");
+            assert_eq!(config.vk_codes, vec![expected_vk], "{code} 应当解析出对应 vk");
+        }
+    }
+
+    /// 幻影过滤的例外范围：F13–F24 与两个侧键改写键在内，边界之外不在。
+    ///
+    /// 这些键带 injected 标志是正常来源（改键软件走 SendInput），漏掉任何一个的症状
+    /// 都是「绑得上、按下去没反应、日志里也没有记录」。
+    #[test]
+    fn injection_exempt_vks_cover_f13_to_f24_and_side_button_remaps() {
+        for vk in 0x7C..=0x87_u32 {
+            assert!(is_injection_exempt_vk(vk), "{vk:#04x}（F13–F24 段）必须开例外");
+        }
+        assert!(is_injection_exempt_vk(0xA6), "BrowserBack 必须开例外");
+        assert!(is_injection_exempt_vk(0xA7), "BrowserForward 必须开例外");
+
+        // 边界：F12 及以下是物理真键，注入的 F12 没有正常来源，维持幻影过滤。
+        assert!(!is_injection_exempt_vk(0x7B), "F12 不该开例外");
+        assert!(!is_injection_exempt_vk(0x88), "0x88 已越过 F24，不该开例外");
+        // 幻影过滤本来要防的就是合成 Alt，绝不能被例外放进来。
+        assert!(!is_injection_exempt_vk(0xA4), "左 Alt 绝不能开例外");
+        assert!(!is_injection_exempt_vk(0xA5), "右 Alt 绝不能开例外");
     }
 }

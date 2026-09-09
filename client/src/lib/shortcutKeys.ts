@@ -43,8 +43,13 @@ export const SINGLE_KEYS: SingleKeyDef[] = [
   // 浏览器后退/前进键（罗技等改键鼠标常把侧键映射成这个，由键盘钩子处理）
   { setting: 'BrowserBack', vk: 0xa6, label: '鼠标侧键（后退键）' },
   { setting: 'BrowserForward', vk: 0xa7, label: '鼠标侧键（前进键）' },
-  // 功能键
-  ...Array.from({ length: 12 }, (_, index) => ({
+  // 功能键 F1–F24（VK 0x70–0x87 连续）。
+  //
+  // F13–F24 在 Windows 里是正式的虚拟键、键盘布局里也有真实 scan code，但没有任何
+  // 量产键盘把它做成物理键 —— 所以它们几乎不可能和别的程序的快捷键撞，正好适合
+  // 可编程键盘、自制 HID 语音设备这类「专用触发键」的场景。
+  // Rust 侧的幻影过滤对这一段开了例外，见 keyboard/mod.rs 的 is_injection_exempt_vk。
+  ...Array.from({ length: 24 }, (_, index) => ({
     setting: `F${index + 1}`,
     vk: 0x70 + index,
     label: `F${index + 1}`,
