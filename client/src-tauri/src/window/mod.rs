@@ -10,7 +10,11 @@ use crate::commands::system::write_log_line;
 use crate::context::{capture_foreground_monitor, MonitorBounds};
 
 const OVERLAY_DEFAULT_BASE_WIDTH: f64 = 360.0;
-const OVERLAY_BASE_HEIGHT: f64 = 56.0;
+// 64 而不是刚好够用的 56：内容是底边锚定的（根节点 items-end + pb-4），加高只是在胶囊
+// 上方多留一块透明区，底边位置和观感都不变（y = bottom - gap - height，高度抵消掉了），
+// 纯粹换取容错。56 时余量只有 2px（16 的 pb-4 + 38 的胶囊 = 54），任何一点缩放误差或
+// 日后给胶囊加一根边框都会把顶部裁平——这就是 Windows「文本大小」123% 时的故障现场。
+const OVERLAY_BASE_HEIGHT: f64 = 64.0;
 const OVERLAY_FALLBACK_WIDTH: f64 = 520.0;
 const OVERLAY_FALLBACK_HEIGHT: f64 = 224.0;
 // 流式实时显示：录音气泡 + 波形条堆叠，需要更宽更高的窗口
@@ -21,6 +25,21 @@ const OVERLAY_MIC_HINT_WIDTH: f64 = 480.0;
 const OVERLAY_MIC_HINT_HEIGHT: f64 = 104.0;
 const OVERLAY_STREAMING_MIC_HINT_HEIGHT: f64 = 244.0;
 const OVERLAY_SCREEN_MARGIN: f64 = 8.0;
+
+/// Overlay.tsx 根节点的 `pb-4`，单位是 CSS px。布局仍由 CSS 决定，这里只是镜像值，
+/// 用于「内容装不装得下」的自检与单测；改了那边记得同步这里，否则判据会失真。
+const OVERLAY_ROOT_PADDING_BOTTOM: f64 = 16.0;
+
+/// webview 的 CSS 缩放相对显示器缩放的额外倍数，可接受范围。
+///
+/// 为什么需要：Tauri 按「逻辑像素 × 显示器 scale」定窗口大小，而 WebView2 的一个 CSS px
+/// 实际是 `显示器 scale × 额外缩放` 个设备像素——Windows 设置 → 辅助功能 → 文本大小
+/// （滑块 100%~225% 连续可调）会被 Edge/WebView2 当成页面缩放叠上去。于是窗口按 56 逻辑
+/// px 建出来，webview 里只有 56/1.23 ≈ 45.6 CSS px 可用，内容从顶部溢出、被
+/// overlay.html 的 `overflow: hidden` 裁平。上限给到 4.0 是留足余量（225% 文本 × 用户
+/// 可能另外用 Ctrl+滚轮缩放过共享的 EBWebView profile）。
+const OVERLAY_CSS_ZOOM_MIN: f64 = 0.5;
+const OVERLAY_CSS_ZOOM_MAX: f64 = 4.0;
 const ACK_FIRST_TIMEOUT_MS: u64 = 1_200;
 const ACK_SECOND_TIMEOUT_MS: u64 = 700;
 const RECOVERY_ACK_TIMEOUT_MS: u64 = 2_000;
@@ -53,7 +72,10 @@ impl OverlayLayout {
         matches!(self, OverlayLayout::Fallback)
     }
 
-    /// 该布局期望的逻辑尺寸（宽, 高）。
+    /// 该布局期望的设计尺寸（宽, 高），单位是 CSS px。
+    ///
+    /// 注意这**不是**可以直接交给 Tauri 的逻辑尺寸：webview 的 CSS px 可能被额外缩放
+    /// （见 OVERLAY_CSS_ZOOM_MIN 的说明），要先乘 css_zoom 才是窗口该有的逻辑尺寸。
     fn dimensions(&self, base_width: f64) -> (f64, f64) {
         match self {
             OverlayLayout::Base => (base_width, OVERLAY_BASE_HEIGHT),
@@ -77,6 +99,9 @@ pub struct WindowState {
     /// 避免监听期间每 33ms 重设一次窗口几何导致的抖动。
     last_applied_layout: Mutex<Option<OverlayLayout>>,
     overlay_base_width: Mutex<f64>,
+    /// webview 里一个 CSS px 相当于几个「显示器逻辑 px」。1.0 表示两者一致。
+    /// 由渲染端上报的 devicePixelRatio 除以窗口所在显示器的 scale 得出，见 note_css_zoom。
+    overlay_css_zoom: Mutex<f64>,
     overlay_monitor: Mutex<Option<MonitorBounds>>,
     overlay_lifecycle: Mutex<()>,
     latest_overlay_payload: Mutex<Option<Value>>,
@@ -99,6 +124,7 @@ impl WindowState {
             overlay_layout: Mutex::new(OverlayLayout::Base),
             last_applied_layout: Mutex::new(None),
             overlay_base_width: Mutex::new(OVERLAY_DEFAULT_BASE_WIDTH),
+            overlay_css_zoom: Mutex::new(1.0),
             overlay_monitor: Mutex::new(None),
             overlay_lifecycle: Mutex::new(()),
             latest_overlay_payload: Mutex::new(None),
@@ -114,6 +140,52 @@ impl WindowState {
             renderer_ready_at_ms: AtomicI64::new(0),
             created_at: Instant::now(),
         }
+    }
+
+    /// webview 里 1 个 CSS px 相当于几个显示器逻辑 px。
+    ///
+    /// 对外公开是给托盘菜单窗口用的：它是同一个 WebView2 环境、同一个 origin，OS 文本
+    /// 缩放和页面缩放都是共享的，所以没必要让它再单独测一遍（它也没有 render ack 通道）。
+    pub fn css_zoom(&self) -> f64 {
+        *self.overlay_css_zoom.lock().unwrap()
+    }
+
+    /// 记录渲染端上报的 devicePixelRatio，换算成 css_zoom 缓存起来。
+    ///
+    /// 为什么不直接缓存 dpr：dpr 里同时含了显示器缩放和 webview 的额外缩放，只有除掉
+    /// 窗口所在显示器的 scale 才是需要补偿的那一份。缓存 dpr 会在两块不同缩放的显示器
+    /// 之间串味（悬浮窗跟着前台窗口跑，换显示器是常态）。
+    ///
+    /// 返回值表示缓存是否有实质变化，调用方据此决定要不要立刻重设窗口几何。
+    fn note_css_zoom(&self, app: &AppHandle, device_pixel_ratio: Option<f64>) -> bool {
+        let Some(dpr) = device_pixel_ratio.filter(|value| value.is_finite() && *value > 0.0) else {
+            return false;
+        };
+        let monitor_scale = app
+            .get_webview_window("overlay")
+            .and_then(|overlay| overlay.scale_factor().ok())
+            .or_else(|| app.primary_monitor().ok().flatten().map(|m| m.scale_factor()))
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(1.0);
+        let zoom = (dpr / monitor_scale).clamp(OVERLAY_CSS_ZOOM_MIN, OVERLAY_CSS_ZOOM_MAX);
+
+        let previous = {
+            let mut cached = self.overlay_css_zoom.lock().unwrap();
+            // 0.01 的死区：dpr 与 scale 都是浮点，每次 present 都上报，末位抖动不该触发
+            // 重设几何（重设会带来一帧的位置/尺寸跳动，见 apply_payload_layout 的注释）。
+            if (zoom - *cached).abs() < 0.01 {
+                return false;
+            }
+            let previous = *cached;
+            *cached = zoom;
+            previous
+        };
+
+        write_log_line(&format!(
+            "[overlay-scale] css zoom {:.4} -> {:.4} dpr={} monitor_scale={}",
+            previous, zoom, dpr, monitor_scale,
+        ));
+        true
     }
 
     /// 在应用启动后的空闲时段提前创建隐藏的 overlay WebView。
@@ -219,9 +291,12 @@ impl WindowState {
 
     /// Overlay 页面注册完事件监听后调用。新建 WebView 时，第一次状态事件可能早于
     /// React listener，因此在 ready 时重放最近状态并重新请求确认。
-    pub fn overlay_ready(&self, app: &AppHandle) {
+    pub fn overlay_ready(&self, app: &AppHandle, device_pixel_ratio: Option<f64>) {
         let show_id = self.active_show_id.load(Ordering::SeqCst);
         self.renderer_ready_at_ms.store(now_ms(), Ordering::SeqCst);
+        // 必须在下面 show_id == 0 的早退之前记：预热（show_id == 0）就是我们唯一能在
+        // 第一次真正显示之前拿到 dpr 的时机。错过它，用户第一次口述就会看到被裁的胶囊。
+        self.note_css_zoom(app, device_pixel_ratio);
         if show_id == 0 {
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.hide();
@@ -240,7 +315,7 @@ impl WindowState {
         }
     }
 
-    pub fn record_render_ack(&self, data: &Value) {
+    pub fn record_render_ack(&self, app: &AppHandle, data: &Value) {
         let show_id = data.get("showId").and_then(Value::as_u64).unwrap_or(0);
         let generation = data.get("generation").and_then(Value::as_u64).unwrap_or(0);
         let healthy = data.get("healthy").and_then(Value::as_bool).unwrap_or(false);
@@ -254,6 +329,16 @@ impl WindowState {
             ));
             return;
         }
+
+        // 先学缩放：这一轮的窗口已经按旧 css_zoom 建好了，学到新值就地重设几何，让**当前**
+        // 这次显示也能被纠正，而不是只让下一次受益（用户按一次热键只看到这一次）。
+        if self.note_css_zoom(app, data.get("devicePixelRatio").and_then(Value::as_f64)) {
+            let layout = self.overlay_layout.lock().unwrap().clone();
+            if let Some(overlay) = app.get_webview_window("overlay") {
+                self.apply_native_layout(app, &overlay, &layout);
+            }
+        }
+        self.warn_if_content_clipped(data, show_id);
 
         if !healthy {
             write_log_line(&format!(
@@ -275,6 +360,41 @@ impl WindowState {
             data.get("contentWidth").and_then(Value::as_f64).unwrap_or(0.0),
             data.get("contentHeight").and_then(Value::as_f64).unwrap_or(0.0),
             data.get("documentVisibility").and_then(Value::as_str).unwrap_or("unknown"),
+        ));
+    }
+
+    /// 内容装不进窗口时留一行日志。
+    ///
+    /// 为什么单独一条：render ack 的 `healthy` 只查「宽高 > 0、没被 display:none/visibility
+    /// 隐藏」，被裁成一半照样是 healthy。2026-09 那次「胶囊顶部被裁」全程 17 次显示都报
+    /// `render ack OK`，只能靠用户截图发现——这类问题必须在日志里能自证。
+    fn warn_if_content_clipped(&self, data: &Value, show_id: u64) {
+        let number = |key: &str| data.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+        // 两个判据都要：clippedTop 是渲染端实测的越界量（最直接），shortfall 是拿视口高度
+        // 反算的缺口（老版本前端不上报 clippedTop 时的兜底，也能反过来印证前者）。
+        let clipped_top = number("clippedTop");
+        let viewport_height = number("viewportHeight");
+        let shortfall = if viewport_height > 0.0 {
+            number("contentHeight") + OVERLAY_ROOT_PADDING_BOTTOM - viewport_height
+        } else {
+            0.0
+        };
+        // 0.5 CSS px 以下是设备像素取整的正常抖动，不算裁切。
+        if clipped_top <= 0.5 && shortfall <= 0.5 {
+            return;
+        }
+        write_log_line(&format!(
+            "[overlay-scale] content clipped show_id={} state={} clippedTopPx={:.2} shortfallPx={:.2} dpr={} cssZoom={:.4} viewport={}x{} content={}x{}",
+            show_id,
+            data.get("overlayState").and_then(Value::as_str).unwrap_or("unknown"),
+            clipped_top,
+            shortfall,
+            number("devicePixelRatio"),
+            self.css_zoom(),
+            number("viewportWidth"),
+            viewport_height,
+            number("contentWidth"),
+            number("contentHeight"),
         ));
     }
 
@@ -531,10 +651,11 @@ impl WindowState {
         // 记录本次应用的布局，供 update_overlay_state 判重、跳过无谓的窗口重设。
         *self.last_applied_layout.lock().unwrap() = Some(layout.clone());
         let base_width = *self.overlay_base_width.lock().unwrap();
+        let css_zoom = self.css_zoom();
         let target_monitor = self.overlay_monitor.lock().unwrap().clone();
         if let Some(bounds) = target_monitor
             .as_ref()
-            .and_then(|value| calc_monitor_overlay_bounds(app, value, layout, base_width))
+            .and_then(|value| calc_monitor_overlay_bounds(app, value, layout, base_width, css_zoom))
         {
             let position_error = overlay.set_position(tauri::Position::Physical(
                 tauri::PhysicalPosition::new(bounds.0, bounds.1),
@@ -550,7 +671,7 @@ impl WindowState {
             };
         }
 
-        let bounds = calc_overlay_bounds(app, layout, base_width);
+        let bounds = calc_overlay_bounds(app, layout, base_width, css_zoom);
         let position_error = overlay.set_position(tauri::Position::Logical(
             tauri::LogicalPosition::new(bounds.0, bounds.1),
         )).err();
@@ -621,7 +742,7 @@ impl WindowState {
         show_immediately: bool,
     ) {
         self.reset_renderer_lifecycle();
-        let bounds = calc_overlay_bounds(app, &layout, base_width);
+        let bounds = calc_overlay_bounds(app, &layout, base_width, self.css_zoom());
         let builder = WebviewWindowBuilder::new(
             app,
             "overlay",
@@ -926,8 +1047,135 @@ fn set_overlay_interactivity(overlay: &tauri::WebviewWindow, interactive: bool) 
 
 #[cfg(test)]
 mod tests {
-    use super::classify_overlay_failure;
+    use super::{
+        classify_overlay_failure, overlay_bounds_in_work_area, OverlayLayout, OVERLAY_BASE_HEIGHT,
+        OVERLAY_DEFAULT_BASE_WIDTH, OVERLAY_ROOT_PADDING_BOTTOM,
+    };
     use serde_json::json;
+
+    /// 2560x1440 @150%，任务栏占掉底部 122px —— 报「胶囊顶部被裁」那台机器的实际布局。
+    const WORK: (i64, i64, i64, i64) = (0, 0, 2560, 1318);
+    const SCALE: f64 = 1.5;
+    /// Windows 设置 → 辅助功能 → 文本大小 123% 时实测的额外缩放（dpr 1.8427 / scale 1.5）。
+    const TEXT_SCALE_123: f64 = 1.2285;
+    /// 胶囊的 `min-height: 38px`（Overlay.tsx）。CSS 改了这里会先红，正是想要的效果。
+    const OVERLAY_PILL_MIN_HEIGHT: f64 = 38.0;
+
+    /// 胶囊在 webview 里需要的 CSS 高度：根节点 pb-4 + 胶囊 min-height。
+    fn required_css_height() -> f64 {
+        OVERLAY_ROOT_PADDING_BOTTOM + OVERLAY_PILL_MIN_HEIGHT
+    }
+
+    #[test]
+    fn base_window_fits_pill_at_default_scale() {
+        let (_, _, _, height) = overlay_bounds_in_work_area(
+            WORK,
+            SCALE,
+            OverlayLayout::Base.dimensions(OVERLAY_DEFAULT_BASE_WIDTH),
+            1.0,
+        );
+        // 窗口物理高换回 CSS px（css_zoom = 1 时 dpr 就是 scale）后要装得下内容。
+        let css_height = height as f64 / SCALE;
+        assert!(
+            css_height >= required_css_height(),
+            "base window {}px physical = {}css < required {}css",
+            height,
+            css_height,
+            required_css_height(),
+        );
+    }
+
+    /// 这条是本次故障的回归钉子：文本大小放大时窗口必须跟着长高，否则内容从顶部溢出、
+    /// 被 overlay.html 的 overflow:hidden 裁平。修复前 height 恒为 84（56×1.5），
+    /// webview 里只有 56 CSS px，装不下 54 + 需要的余量。
+    #[test]
+    fn base_window_still_fits_pill_when_os_text_scale_enlarges_css_px() {
+        let (_, _, _, height) = overlay_bounds_in_work_area(
+            WORK,
+            SCALE,
+            OverlayLayout::Base.dimensions(OVERLAY_DEFAULT_BASE_WIDTH),
+            TEXT_SCALE_123,
+        );
+        // 此时 1 CSS px = scale × css_zoom 个设备像素。
+        let css_height = height as f64 / (SCALE * TEXT_SCALE_123);
+        assert!(
+            css_height >= required_css_height(),
+            "scaled base window {}px physical = {}css < required {}css",
+            height,
+            css_height,
+            required_css_height(),
+        );
+        assert!(
+            height > (OVERLAY_BASE_HEIGHT * SCALE) as u32,
+            "window did not grow with css_zoom: {}",
+            height,
+        );
+    }
+
+    #[test]
+    fn every_layout_fits_its_content_under_os_text_scale() {
+        // 各布局在 webview 里需要的 CSS 高度（pb-4 + 内容），内容高取实测值。
+        // 兜底卡片 149、输入源条 30 + gap 8、流式气泡 110 + gap 8 都来自现场日志/CSS。
+        let cases = [
+            ("base", OverlayLayout::Base, required_css_height()),
+            ("mic_hint", OverlayLayout::BaseWithMicHint, required_css_height() + 8.0 + 30.0),
+            ("fallback", OverlayLayout::Fallback, OVERLAY_ROOT_PADDING_BOTTOM + 149.0),
+            ("streaming", OverlayLayout::Streaming, required_css_height() + 8.0 + 110.0),
+            (
+                "streaming_mic_hint",
+                OverlayLayout::StreamingWithMicHint,
+                required_css_height() + 8.0 + 110.0 + 8.0 + 30.0,
+            ),
+        ];
+        for (name, layout, required) in cases {
+            let (_, _, _, height) = overlay_bounds_in_work_area(
+                WORK,
+                SCALE,
+                layout.dimensions(OVERLAY_DEFAULT_BASE_WIDTH),
+                TEXT_SCALE_123,
+            );
+            let css_height = height as f64 / (SCALE * TEXT_SCALE_123);
+            assert!(
+                css_height >= required,
+                "{}: {}css available < {}css required",
+                name,
+                css_height,
+                required,
+            );
+        }
+    }
+
+    /// 底边贴屏距离是屏幕几何，不该跟着 webview 的缩放变——否则调一下系统文本大小，
+    /// 悬浮窗就整体往屏幕中间跑。
+    #[test]
+    fn bottom_edge_stays_put_regardless_of_css_zoom() {
+        let bottom_of = |css_zoom: f64| {
+            let (_, y, _, height) = overlay_bounds_in_work_area(
+                WORK,
+                SCALE,
+                OverlayLayout::Base.dimensions(OVERLAY_DEFAULT_BASE_WIDTH),
+                css_zoom,
+            );
+            y as i64 + height as i64
+        };
+        assert_eq!(bottom_of(1.0), bottom_of(TEXT_SCALE_123));
+        assert_eq!(bottom_of(1.0), bottom_of(2.25));
+    }
+
+    /// 窗口再大也不能被推出工作区：夹取之后 y 仍须落在工作区内。
+    #[test]
+    fn extreme_css_zoom_stays_inside_work_area() {
+        let (x, y, width, height) = overlay_bounds_in_work_area(
+            WORK,
+            SCALE,
+            OverlayLayout::StreamingWithMicHint.dimensions(OVERLAY_DEFAULT_BASE_WIDTH),
+            4.0,
+        );
+        assert!(x >= 0, "x={}", x);
+        assert!(y >= 0, "y={}", y);
+        assert!(x as i64 + width as i64 <= 2560, "right={}", x as i64 + width as i64);
+        assert!(y as i64 + height as i64 <= 1318, "bottom={}", y as i64 + height as i64);
+    }
 
     fn native_window() -> serde_json::Value {
         json!({
@@ -996,14 +1244,57 @@ fn monitor_info(app: &AppHandle) -> (f64, f64, f64) {
     }
 }
 
-fn calc_overlay_bounds(app: &AppHandle, layout: &OverlayLayout, base_width: f64) -> (f64, f64, f64, f64) {
-    let (desired_width, desired_height) = layout.dimensions(base_width);
+fn calc_overlay_bounds(
+    app: &AppHandle,
+    layout: &OverlayLayout,
+    base_width: f64,
+    css_zoom: f64,
+) -> (f64, f64, f64, f64) {
+    let (design_width, design_height) = layout.dimensions(base_width);
+    // 设计尺寸是 CSS px；乘 css_zoom 之后才是能交给 Tauri 的逻辑尺寸。
+    let desired_width = design_width * css_zoom;
+    let desired_height = design_height * css_zoom;
     let (screen_width, screen_height, _) = monitor_info(app);
     let width = desired_width.min(screen_width - 40.0).max(160.0);
-    let height = desired_height.min(screen_height - 40.0).max(56.0);
+    let height = desired_height
+        .min(screen_height - 40.0)
+        .max(OVERLAY_BASE_HEIGHT * css_zoom);
     let x = ((screen_width - width) / 2.0).round();
     let y = (screen_height - height - 72.0).max(8.0);
     (x, y, width, height)
+}
+
+/// 显示器内定位的纯数学部分，全程物理像素，便于单测钉住缩放行为。
+///
+/// - `work`：目标显示器工作区 `(left, top, right, bottom)`，物理像素
+/// - `scale`：该显示器的缩放
+/// - `design`：布局的设计尺寸，CSS px
+/// - `css_zoom`：webview 里 1 CSS px 相当于几个逻辑 px
+fn overlay_bounds_in_work_area(
+    work: (i64, i64, i64, i64),
+    scale: f64,
+    design: (f64, f64),
+    css_zoom: f64,
+) -> (i32, i32, u32, u32) {
+    let (left, top, right, bottom) = work;
+    let work_width = (right - left).max(1);
+    let work_height = (bottom - top).max(1);
+    // margin 与 bottom_gap 描述「窗口离屏幕边多远」，是屏幕几何，**不跟 css_zoom 走**：
+    // webview 内部怎么排版不该改变悬浮窗贴屏底的距离。
+    let margin = (OVERLAY_SCREEN_MARGIN * scale).round().max(1.0) as i64;
+    let bottom_gap = (72.0 * scale).round().max(margin as f64) as i64;
+    let available_width = (work_width - margin * 2).max(1);
+    let available_height = (work_height - margin * 2).max(1);
+    // 用 ceil 而不是 round：宁可多出一个物理像素的透明边，也不要向下取整把本就不多的
+    // 垂直余量吃掉——少一个像素就是胶囊顶部被裁一条。
+    let width = ((design.0 * css_zoom * scale).ceil().max(1.0) as i64).min(available_width);
+    let height = ((design.1 * css_zoom * scale).ceil().max(1.0) as i64).min(available_height);
+    let x = left + ((work_width - width) / 2);
+    let min_y = top + margin;
+    // height 已被 available_height 夹住，所以 max_y >= min_y 恒成立，clamp 不会 panic。
+    let max_y = bottom - margin - height;
+    let y = (bottom - bottom_gap - height).clamp(min_y, max_y);
+    (x as i32, y as i32, width as u32, height as u32)
 }
 
 /// 在录音开始时的前台窗口所在显示器底部居中放置。
@@ -1012,6 +1303,7 @@ fn calc_monitor_overlay_bounds(
     target: &MonitorBounds,
     layout: &OverlayLayout,
     base_width: f64,
+    css_zoom: f64,
 ) -> Option<(i32, i32, u32, u32)> {
     let center_x = target.left as i64 + (target.right as i64 - target.left as i64) / 2;
     let center_y = target.top as i64 + (target.bottom as i64 - target.top as i64) / 2;
@@ -1030,19 +1322,15 @@ fn calc_monitor_overlay_bounds(
         return None;
     }
 
-    let work_width = (target.right as i64 - target.left as i64).max(1);
-    let work_height = (target.bottom as i64 - target.top as i64).max(1);
-    let margin = (OVERLAY_SCREEN_MARGIN * scale).round().max(1.0) as i64;
-    let bottom_gap = (72.0 * scale).round().max(margin as f64) as i64;
-    let available_width = (work_width - margin * 2).max(1);
-    let available_height = (work_height - margin * 2).max(1);
-    let (desired_width, desired_height) = layout.dimensions(base_width);
-    let width = ((desired_width * scale).round().max(1.0) as i64).min(available_width);
-    let height = ((desired_height * scale).round().max(1.0) as i64).min(available_height);
-    let x = target.left as i64 + ((work_width - width) / 2);
-    let min_y = target.top as i64 + margin;
-    let max_y = target.bottom as i64 - margin - height;
-    let y = (target.bottom as i64 - bottom_gap - height).clamp(min_y, max_y);
-
-    Some((x as i32, y as i32, width as u32, height as u32))
+    Some(overlay_bounds_in_work_area(
+        (
+            target.left as i64,
+            target.top as i64,
+            target.right as i64,
+            target.bottom as i64,
+        ),
+        scale,
+        layout.dimensions(base_width),
+        css_zoom,
+    ))
 }

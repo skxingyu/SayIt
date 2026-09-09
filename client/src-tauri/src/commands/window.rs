@@ -40,14 +40,19 @@ pub async fn update_overlay_state(
     Ok(())
 }
 
+/// `device_pixel_ratio` 可缺省：老版本前端不带它，此时沿用缓存的缩放。
 #[tauri::command]
-pub fn overlay_ready(app: AppHandle, window_state: State<'_, WindowState>) {
-    window_state.overlay_ready(&app);
+pub fn overlay_ready(
+    app: AppHandle,
+    window_state: State<'_, WindowState>,
+    device_pixel_ratio: Option<f64>,
+) {
+    window_state.overlay_ready(&app, device_pixel_ratio);
 }
 
 #[tauri::command]
-pub fn overlay_render_ack(data: Value, window_state: State<'_, WindowState>) {
-    window_state.record_render_ack(&data);
+pub fn overlay_render_ack(app: AppHandle, data: Value, window_state: State<'_, WindowState>) {
+    window_state.record_render_ack(&app, &data);
 }
 
 #[tauri::command]
